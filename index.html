@@ -381,10 +381,29 @@
         }
         .sync-bar .sync-btn:hover { background: rgba(255,255,255,0.35); }
         @media print { .sync-bar { display: none !important; } }
+        #appLoadingOverlay {
+            position: fixed; inset: 0; background: #fff; z-index: 99999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 14px; transition: opacity 0.3s ease;
+        }
+        #appLoadingOverlay .spinner {
+            width: 48px; height: 48px; border: 5px solid #e0e0e0;
+            border-top-color: var(--primary, #4f46e5); border-radius: 50%;
+            animation: appSpin 0.8s linear infinite;
+        }
+        #appLoadingOverlay .loading-text { font-size: 15px; color: #444; font-weight: 600; text-align: center; }
+        #appLoadingOverlay .loading-sub { font-size: 13px; color: #888; }
+        @keyframes appSpin { to { transform: rotate(360deg); } }
+        #appLoadingOverlay.hidden { opacity: 0; pointer-events: none; }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
+    <div id="appLoadingOverlay">
+        <div class="spinner"></div>
+        <div class="loading-text" id="appLoadingText">☁️ சீட்டில் இருந்து சேவைகள் ஏற்றப்படுகிறது...</div>
+        <div class="loading-sub" id="appLoadingSub">தயவுசெய்து காத்திருக்கவும்</div>
+    </div>
     <div class="container">
         <div class="sync-bar">
             <span id="syncStatus">☁️ சின்க் தயார்</span>
@@ -1014,7 +1033,24 @@
         let messageLog = [];
 
         document.addEventListener('DOMContentLoaded', async function() {
-            if (gasUrl) await pullFromCloud(true);
+            const overlay = document.getElementById('appLoadingOverlay');
+            const loadingSub = document.getElementById('appLoadingSub');
+            // Safety net: if sync hangs beyond 8s, force-hide the overlay so the app is never stuck
+            const forceHideTimer = setTimeout(function () {
+                if (overlay && !overlay.classList.contains('hidden')) {
+                    if (loadingSub) loadingSub.textContent = '⚠️ சின்க் தாமதமாகிறது — உள்ளூர் தரவு காட்டப்படுகிறது';
+                    overlay.classList.add('hidden');
+                    setTimeout(function () { overlay.style.display = 'none'; }, 350);
+                }
+            }, 8000);
+            let syncOk = true;
+            if (gasUrl) {
+                syncOk = await pullFromCloud(true);
+                // pullFromCloud returns updatedCount (number, could be 0) on success, or 0 on error too —
+                // re-check via syncStatus text to tell success apart from failure
+                const statusText = document.getElementById('syncStatus').textContent;
+                syncOk = !statusText.includes('பிழை');
+            }
             loadAllServices(); 
             updateDisplay(); 
             updateWhatsAppMessage(); 
@@ -1022,6 +1058,18 @@
             loadMessageLog(); 
             renderLogTable();
             loadAttachments();
+
+            const totalCount = (typeof predefinedServices !== 'undefined' ? predefinedServices.length : 0) +
+                                (typeof customServices !== 'undefined' ? customServices.length : 0);
+            if (loadingSub) {
+                loadingSub.textContent = syncOk
+                    ? ('✅ அனைத்தும் வந்துவிட்டது — ' + totalCount + ' சேவைகள்')
+                    : '⚠️ சின்க் பிழை — இணையம் இல்லாத தரவு காட்டப்படுகிறது';
+            }
+            clearTimeout(forceHideTimer);
+            setTimeout(function () {
+                if (overlay) { overlay.classList.add('hidden'); setTimeout(function () { overlay.style.display = 'none'; }, 350); }
+            }, syncOk ? 300 : 900);
 
             document.getElementById('serviceSearch').addEventListener('input', function() { renderServices(); });
             document.getElementById('customerName').addEventListener('input', updateWhatsAppMessage);
@@ -1104,7 +1152,7 @@
                 alert('செல்லுபடியான தொலைபேசி எண் இல்லை');
                 return;
             }
-            const message = `வணக்கம் ${entry.customerName}!\n\nதாஸ் பொது சேவை மையத்தில் உங்கள் சேவை (${entry.serviceName}) இன்னும் நிலுவையில் உள்ளது. தயவு செய்து விரைவில் மையத்தை தொடர்பு கொள்ளவும்.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1\n\nவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.`;
+            const message = `வணக்கம் ${entry.customerName}!\n\nதாஸ் பொது சேவை மையத்தில் உங்கள் சேவை (${entry.serviceName}) இன்னும் நிலுவையில் உள்ளது. தயவு செய்து விரைவில் மையத்தை தொடர்பு கொள்ளவும்.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1\n\nவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.`;
             const url = `https://wa.me/91${phone}?text=${encodeURIComponent(message)}`;
             window.open(url, '_blank');
         }
@@ -1231,7 +1279,7 @@
                 attachments.forEach(file => { message += `📎 ${file.name} (${formatFileSize(file.size)})\n`; });
                 message += `\n`;
             }
-            message += `தொடர்பு கொள்ள:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.\n\nநன்றி! மீண்டும் வருக!`;
+            message += `தொடர்பு கொள்ள:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.\n\nநன்றி! மீண்டும் வருக!`;
             document.getElementById('messagePreview').textContent = message;
         }
         function sendWhatsAppMessage() {
@@ -1250,7 +1298,7 @@
                 attachments.forEach(file => { message += `📎 ${encodeURIComponent(file.name)} (${formatFileSize(file.size)})%0A`; });
                 message += `%0A`;
             }
-            message += `தொடர்பு கொள்ள:%0A📞 8870232332%0A📞 9843232324%0A📍 தூத்துக்குடி-1%0A%0Aவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.%0A%0Aநன்றி! மீண்டும் வருக!`;
+            message += `தொடர்பு கொள்ள:%0A📞 8870232332%0A📞 9843232324%0A📍 தூத்துக்குடி-1%0A%0Aவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.%0A%0Aநன்றி! மீண்டும் வருக!`;
             const whatsappUrl = `https://wa.me/91${cleanPhone}?text=${message}`;
             window.open(whatsappUrl, '_blank'); 
             addToLog(customerName, cleanPhone, currentService.name, currentService.price);
@@ -1270,7 +1318,7 @@
                 attachments.forEach(file => { message += `📎 ${file.name} (${formatFileSize(file.size)})\n`; });
                 message += `\n`;
             }
-            message += `தொடர்பு கொள்ள:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.\n\nநன்றி! மீண்டும் வருக!`;
+            message += `தொடர்பு கொள்ள:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.\n\nநன்றி! மீண்டும் வருக!`;
             alert('WhatsApp செய்தி முன்னோட்டம்:\n\n' + message);
         }
         function updateThankYouMessage() {
@@ -1280,7 +1328,7 @@
             let message = `வணக்கம் ${customerName}!\n\nஎங்கள் தாஸ் பொதுசேவை மையத்தை தேர்வு செய்து, வருகை புரிந்தமைக்கு, மிகவும் நன்றி.\n\n`;
             if (services !== '[சேவைகள்]') message += `சேவைகள்: ${services}\n`;
             if (refNumbers !== '[குறிப்பு எண்கள்]') message += `குறிப்பு எண்கள்: ${refNumbers}\n`;
-            message += `\nஇந்த நாள் இனிதாக அமைய வாழ்த்துகிறோம்.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1\n\nவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.`;
+            message += `\nஇந்த நாள் இனிதாக அமைய வாழ்த்துகிறோம்.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1\n\nவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.`;
             document.getElementById('thankYouMessagePreview').textContent = message;
         }
         function sendThankYouMessage() {
@@ -1311,7 +1359,7 @@
                     document.querySelector('.status-option-btn:nth-child(1)').classList.add('active');
                     message = `வணக்கம் ${customerName}! 👋\n\nதாஸ் பொது சேவை மையத்திற்கு உங்களை வரவேற்கிறோம்! 😊\n\nநீங்கள் கோரிய ${service} சேவைக்கு நாங்கள் உதவ மகிழ்ச்சியடைகிறோம்.\n\nஎங்கள் சேவைகள்:\n✓ அரசு சேவைகள்\n✓ ஆவண தயாரிப்பு\n✓ புகைப்படம் & அச்சிடுதல்\n✓ பாஸ்போர்ட் & விசா\n\n`;
                     if (statusAttachments.length > 0) { message += `இணைக்கப்பட்ட ஆவணங்கள்:\n`; statusAttachments.forEach(file => { message += `📎 ${file.name} (${formatFileSize(file.size)})\n`; }); message += `\n`; }
-                    message += `தொடர்பு எண்கள்:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1`;
+                    message += `தொடர்பு எண்கள்:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1`;
                     break;
                 case 'received':
                     document.querySelector('.status-option-btn:nth-child(2)').classList.add('active');
@@ -1319,7 +1367,7 @@
                     if (refNumber && refNumber !== '[குறிப்பு எண்]') message += `\n\nகுறிப்பு எண்: ${refNumber}`;
                     if (note) message += `\n\nகுறிப்பு: ${note}`;
                     if (statusAttachments.length > 0) { message += `\n\nஇணைக்கப்பட்ட ஆவணங்கள்:\n`; statusAttachments.forEach(file => { message += `📎 ${file.name} (${formatFileSize(file.size)})\n`; }); }
-                    message += `\n\nஉங்கள் கோரிக்கை விரைவில் செயல்படுத்தப்படும்.\n\nதொடர்பு எண்கள்:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1`;
+                    message += `\n\nஉங்கள் கோரிக்கை விரைவில் செயல்படுத்தப்படும்.\n\nதொடர்பு எண்கள்:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1`;
                     break;
                 default:
                     document.querySelector('.status-option-btn:nth-child(2)').classList.add('active');
@@ -1327,7 +1375,7 @@
                     if (refNumber && refNumber !== '[குறிப்பு எண்]') message += `\n\nகுறிப்பு எண்: ${refNumber}`;
                     if (note) message += `\n\nகுறிப்பு: ${note}`;
                     if (statusAttachments.length > 0) { message += `\n\nஇணைக்கப்பட்ட ஆவணங்கள்:\n`; statusAttachments.forEach(file => { message += `📎 ${file.name} (${formatFileSize(file.size)})\n`; }); }
-                    message += `\n\nஉங்கள் கோரிக்கை விரைவில் செயல்படுத்தப்படும்.\n\nதொடர்பு எண்கள்:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 9.30 முதல் மாலை 5.30 வரை மட்டுமே.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1`;
+                    message += `\n\nஉங்கள் கோரிக்கை விரைவில் செயல்படுத்தப்படும்.\n\nதொடர்பு எண்கள்:\n📞 8870232332\n📞 9843232324\n📍 தூத்துக்குடி-1\n\nவேலை நேரம் : காலை 8.00 முதல் இரவு 8.00 வரை.\n\nநன்றி!\nதாஸ் பொது சேவை மையம்\nதூத்துக்குடி-1`;
             }
             document.getElementById('statusMessagePreview').textContent = message;
         }
